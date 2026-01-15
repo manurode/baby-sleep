@@ -37,21 +37,56 @@ class MockCamera(object):
 
 class VideoCamera(object):
     def __init__(self):
-        self.video = cv2.VideoCapture(0, cv2.CAP_DSHOW) # CAP_DSHOW often helps on Windows
+        self.video = None
         self.last_frame = None
         self.motion_detected = False
         self.motion_score = 0
+        self.lock = threading.Lock()
         
-        # Check if camera opened successfully
-        if not self.video.isOpened():
-            raise RuntimeError("Could not exist video source.")
+        try:
+            with open("camera_debug.log", "w") as f:
+                f.write("Starting camera init...\n")
+                
+            # We use CAP_DSHOW as it was confirmed working by diagnose_camera.py
+            print("Attempting to open Camera Index 0 with CAP_DSHOW...")
+            self.video = cv2.VideoCapture(0, cv2.CAP_DSHOW)
             
-        # Warmup
-        ret, frame = self.video.read()
-        if ret:
-            self.last_frame = self.process_frame(frame)
-        else:
-             raise RuntimeError("Could not read frame from video source.")
+            if not self.video.isOpened():
+                params = (0, cv2.CAP_DSHOW)
+                msg = f"Camera failed to open (isOpened() returned False). Params: {params}"
+                print(msg)
+                with open("camera_debug.log", "a") as f: f.write(msg + "\n")
+                self.video = None
+            else:
+                # Try reading one frame to ensure it actually works
+                ret, frame = self.video.read()
+                if not ret:
+                    msg = "Camera opened but failed to read first frame."
+                    print(msg)
+                    with open("camera_debug.log", "a") as f: f.write(msg + "\n")
+                    self.video.release()
+                    self.video = None
+                else:
+                    self.last_frame = self.process_frame(frame)
+                    msg = "Camera initialized successfully!"
+                    print(msg)
+                    with open("camera_debug.log", "a") as f: f.write(msg + "\n")
+                    
+        except Exception as e:
+            msg = f"CRITICAL ERROR initializing camera: {e}"
+            print(msg)
+            with open("camera_debug.log", "a") as f: f.write(msg + "\n")
+            if self.video and self.video.isOpened():
+                self.video.release()
+            self.video = None
+            
+        # If we failed to get a real camera, we MUST NOT raise an exception here.
+        # The get_camera() function will see self.video is None (or we handle it here)
+        # But actually, the previous logic relied on an exception to switch to MockCamera.
+        # We need to ensure logic flow handles failures without crashing.
+    
+    def is_working(self):
+        return self.video is not None and self.video.isOpened()
 
     def process_frame(self, frame):
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
@@ -59,7 +94,11 @@ class VideoCamera(object):
         return gray
 
     def get_frame(self):
-        ret, frame = self.video.read()
+        with self.lock:
+            if not self.video or not self.video.isOpened():
+                return None
+            ret, frame = self.video.read()
+        
         if not ret:
             return None
             
@@ -91,21 +130,31 @@ class VideoCamera(object):
         return jpeg.tobytes()
 
     def __del__(self):
-        if self.video.isOpened():
+        if self.video and self.video.isOpened():
             self.video.release()
 
 camera = None
+camera_lock = threading.Lock()
 
 def get_camera():
     global camera
-    if camera is None:
-        try:
-            camera = VideoCamera()
-            print("Camera initialized successfully.")
-        except Exception as e:
-            print(f"Error initializing camera: {e}")
-            print("Falling back to MockCamera.")
-            camera = MockCamera()
+    with camera_lock:
+        if camera is None:
+            print("Initializing camera for the first time...")
+            # Try to create the real camera object
+            try:
+                 real_cam = VideoCamera()
+                 if real_cam.is_working():
+                     camera = real_cam
+                     print("Using Real VideoCamera.")
+                 else:
+                     print("Real Camera init failed (logic). Falling back to MockCamera.")
+                     camera = MockCamera()
+            except Exception as e:
+                print(f"Exception during Camera instantiation: {e}")
+                print("Falling back to MockCamera.")
+                camera = MockCamera()
+            
     return camera
 
 @app.route('/')
@@ -135,4 +184,4 @@ def status():
     })
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    app.run(host='0.0.0.0', port=5000, debug=True, use_reloader=False)

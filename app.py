@@ -109,12 +109,15 @@ class VideoCamera(object):
             
         # Compute difference
         frame_delta = cv2.absdiff(self.last_frame, current_gray)
-        thresh = cv2.threshold(frame_delta, 25, 255, cv2.THRESH_BINARY)[1]
+        # Tune sensitivity for breathing detection
+        # Lower threshold for pixel differences (was 25)
+        thresh = cv2.threshold(frame_delta, 5, 255, cv2.THRESH_BINARY)[1]
         thresh = cv2.dilate(thresh, None, iterations=2)
         
         # Calculate motion score (sum of white pixels)
         self.motion_score = np.sum(thresh)
-        self.motion_detected = self.motion_score > 5000 # Threshold, tune later
+        # Lower score threshold (was 5000) - Breathing is very subtle
+        self.motion_detected = self.motion_score > 500 # Highly sensitive
         
         # Update last frame
         self.last_frame = current_gray

@@ -28,5 +28,5 @@ Build a web-based baby monitor application that uses a webcam to detect breathin
 - [x] Alert system (Visual) when no movement is detected (Simulating breath holding/apnea - careful with medical claims, keep it simple "Movement" vs "No Movement").
 
 ## Phase 4: Refinement
-- [ ] Tune sensitivity of motion detection.
-- [ ] Polish UI animations.
+- [x] Tune sensitivity of motion detection.
+- [x] Polish UI animations.

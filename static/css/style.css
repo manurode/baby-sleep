@@ -61,8 +61,8 @@ p.subtitle {
     background: var(--card-bg);
     border-radius: 20px;
     padding: 1.5rem;
-    box-shadow: 0 10px 40px -10px rgba(0,0,0,0.5);
-    border: 1px solid rgba(255,255,255,0.05);
+    box-shadow: 0 10px 40px -10px rgba(0, 0, 0, 0.5);
+    border: 1px solid rgba(255, 255, 255, 0.05);
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -76,7 +76,7 @@ p.subtitle {
     border-radius: 12px;
     overflow: hidden;
     position: relative;
-    box-shadow: 0 0 30px rgba(0,0,0,0.3);
+    box-shadow: 0 0 30px rgba(0, 0, 0, 0.3);
 }
 
 .video-container img {
@@ -89,7 +89,7 @@ p.subtitle {
     position: absolute;
     top: 1rem;
     right: 1rem;
-    background: rgba(0,0,0,0.6);
+    background: rgba(0, 0, 0, 0.6);
     backdrop-filter: blur(10px);
     padding: 0.5rem 1rem;
     border-radius: 20px;
@@ -101,12 +101,46 @@ p.subtitle {
 }
 
 .indicator-dot {
-    width: 8px;
-    height: 8px;
+    width: 10px;
+    height: 10px;
     background-color: currentColor;
     border-radius: 50%;
-    box-shadow: 0 0 10px currentColor;
-    animation: pulse 2s infinite;
+    box-shadow: 0 0 15px currentColor;
+    animation: pulse 2s infinite ease-in-out;
+}
+
+@keyframes pulse {
+    0% {
+        transform: scale(1);
+        opacity: 1;
+        box-shadow: 0 0 10px currentColor;
+    }
+
+    50% {
+        transform: scale(1.3);
+        opacity: 0.7;
+        box-shadow: 0 0 20px currentColor;
+    }
+
+    100% {
+        transform: scale(1);
+        opacity: 1;
+        box-shadow: 0 0 10px currentColor;
+    }
+}
+
+.monitor-card {
+    background: rgba(30, 41, 59, 0.7);
+    backdrop-filter: blur(20px);
+    border-radius: 24px;
+    padding: 2rem;
+    box-shadow: 0 20px 50px -10px rgba(0, 0, 0, 0.5);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    transition: box-shadow 0.3s ease;
+}
+
+.monitor-card:hover {
+    box-shadow: 0 25px 60px -12px rgba(56, 189, 248, 0.15);
 }
 
 .data-panel {
@@ -119,7 +153,7 @@ p.subtitle {
 }
 
 .metric-card {
-    background: rgba(255,255,255,0.03);
+    background: rgba(255, 255, 255, 0.03);
     border-radius: 16px;
     padding: 1.5rem;
     display: flex;
@@ -147,7 +181,7 @@ p.subtitle {
 .graph-container {
     width: 100%;
     height: 100px;
-    background: rgba(0,0,0,0.2);
+    background: rgba(0, 0, 0, 0.2);
     border-radius: 12px;
     margin-top: 2rem;
     position: relative;
@@ -160,19 +194,55 @@ p.subtitle {
 
 .bar {
     flex: 1;
-    background: var(--accent-color);
-    opacity: 0.6;
-    border-radius: 2px 2px 0 0;
-    transition: height 0.1s ease;
+    background: linear-gradient(to top, var(--accent-color), #7dd3fc);
+    opacity: 0.8;
+    border-radius: 4px 4px 0 0;
+    transition: height 0.2s cubic-bezier(0.4, 0, 0.2, 1), background-color 0.3s ease;
+    box-shadow: 0 0 10px rgba(56, 189, 248, 0.2);
+}
+
+.breathing-active {
+    animation: breathing-glow 3s infinite ease-in-out;
+    border: 1px solid rgba(74, 222, 128, 0.5);
+}
+
+@keyframes breathing-glow {
+    0% {
+        box-shadow: 0 0 20px rgba(74, 222, 128, 0.1);
+    }
+
+    50% {
+        box-shadow: 0 0 40px rgba(74, 222, 128, 0.3);
+    }
+
+    100% {
+        box-shadow: 0 0 20px rgba(74, 222, 128, 0.1);
+    }
 }
 
 @keyframes pulse {
-    0% { transform: scale(1); opacity: 1; }
-    50% { transform: scale(1.5); opacity: 0.5; }
-    100% { transform: scale(1); opacity: 1; }
+    0% {
+        transform: scale(1);
+        opacity: 1;
+    }
+
+    50% {
+        transform: scale(1.5);
+        opacity: 0.5;
+    }
+
+    100% {
+        transform: scale(1);
+        opacity: 1;
+    }
 }
 
 @media (max-width: 768px) {
-    h1 { font-size: 2rem; }
-    .container { padding: 1rem; }
+    h1 {
+        font-size: 2rem;
+    }
+
+    .container {
+        padding: 1rem;
+    }
 }

@@ -11,15 +11,18 @@ document.addEventListener('DOMContentLoaded', () => {
     function updateGraph(score) {
         const bar = document.createElement('div');
         bar.className = 'bar';
-        // Normalize score roughly (assuming 0-10000 range usually)
-        let height = Math.min((score / 15000) * 100, 100);
+        // Normalize score: Adjusted for higher sensitivity. 
+        // We want 500-1000 to show up clearly (10-20%).
+        let height = Math.min((score / 5000) * 100, 100);
         bar.style.height = `${height}%`;
 
-        // Color coding
-        if (score > 5000) {
-            bar.style.backgroundColor = 'var(--success-color)';
+        // Color coding - Threshold matches backend (500)
+        if (score > 500) {
+            bar.style.background = 'var(--success-color)';
+            bar.style.boxShadow = '0 0 10px var(--success-color)';
         } else {
-            bar.style.backgroundColor = 'var(--text-secondary)';
+            bar.style.background = 'var(--text-secondary)';
+            bar.style.boxShadow = 'None';
         }
 
         graphContainer.appendChild(bar);
@@ -35,17 +38,20 @@ document.addEventListener('DOMContentLoaded', () => {
             .then(data => {
                 // Update text
                 scoreValue.textContent = Math.round(data.motion_score).toLocaleString();
+                const videoContainer = document.querySelector('.video-container');
 
                 if (data.motion_detected) {
-                    statusText.textContent = "DETECTED";
+                    statusText.textContent = "BREATHING DETECTED";
                     statusText.style.color = "var(--success-color)";
                     indicator.style.color = "var(--success-color)";
-                    videoOverlayText.textContent = "Live - Movement";
+                    videoOverlayText.textContent = "Live - Active";
+                    videoContainer.classList.add('breathing-active');
                 } else {
-                    statusText.textContent = "IDLE";
-                    statusText.style.color = "var(--text-secondary)";
+                    statusText.textContent = "IDLE - CHECK BABY";
+                    statusText.style.color = "var(--danger-color)"; // More urgent if no breathing
                     indicator.style.color = "var(--danger-color)";
                     videoOverlayText.textContent = "Live - Idle";
+                    videoContainer.classList.remove('breathing-active');
                 }
 
                 updateGraph(data.motion_score);

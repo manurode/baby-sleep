@@ -4,31 +4,79 @@ document.addEventListener('DOMContentLoaded', () => {
     const indicator = document.querySelector('.indicator-dot');
     const videoOverlayText = document.querySelector('.video-overlay span');
     const graphContainer = document.getElementById('motion-graph');
+    const body = document.body;
+    const monitorCard = document.querySelector('.monitor-card');
 
-    // Graph limits
-    const maxBars = 50;
+    // Configuration
+    const THRESHOLD = 500;
+    const POLLING_RATE = 200; // ms (Poll less frequently for performance)
+    const ALARM_TIMEOUT = 10000; // 10 seconds of no movement
+    const GRAPH_HISTORY_LIMIT = 200; // Keep 200 bars in DOM
 
-    function updateGraph(score) {
+    // State
+    let lastMovementTime = Date.now();
+    let isAlarmActive = false;
+
+    function activateAlarm() {
+        if (isAlarmActive) return;
+        isAlarmActive = true;
+
+        statusText.textContent = "ALARM: NO MOVEMENT DETECTED!";
+        statusText.style.color = "var(--danger-color)";
+        videoOverlayText.textContent = "ALARM - CHECK BABY";
+        videoOverlayText.style.color = "var(--danger-color)";
+
+        indicator.classList.remove('active');
+        indicator.classList.add('alarm');
+
+        body.classList.add('alarm-active');
+        monitorCard.classList.add('alarm-state');
+    }
+
+    function deactivateAlarm() {
+        if (!isAlarmActive) return;
+        isAlarmActive = false;
+
+        // Reset styles (Text will be updated by regular update loop)
+        indicator.classList.remove('alarm');
+        body.classList.remove('alarm-active');
+        monitorCard.classList.remove('alarm-state');
+    }
+
+    function updateGraph(score, detected) {
         const bar = document.createElement('div');
         bar.className = 'bar';
-        // Normalize score: Adjusted for higher sensitivity. 
-        // We want 500-1000 to show up clearly (10-20%).
+
+        // Normalize height (logarithmic scale might be better, but linear for now)
+        // Cap at 100%
         let height = Math.min((score / 5000) * 100, 100);
+        // Ensure some visibility even for low scores if detected
+        if (height < 5 && score > 0) height = 5;
+
         bar.style.height = `${height}%`;
 
-        // Color coding - Threshold matches backend (500)
-        if (score > 500) {
-            bar.style.background = 'var(--success-color)';
-            bar.style.boxShadow = '0 0 10px var(--success-color)';
-        } else {
-            bar.style.background = 'var(--text-secondary)';
-            bar.style.boxShadow = 'None';
+        if (isAlarmActive) {
+            bar.classList.add('alarm');
+        } else if (detected) {
+            bar.classList.add('active');
         }
 
-        graphContainer.appendChild(bar);
+        // Prepend to graph (since we use direction: rtl for "scrolling back")
+        // Or append? With RTL, the "start" is the right side.
+        // If we appendChild, it goes to the "left" visually if flex-direction is row-reverse
+        // But with default flex and direction: rtl:
+        // First child is on the RIGHT.
+        // So we should prepend new bars so they appear on the right?
+        // Actually, let's keep it simple: Append child, scroll to end.
+        // CSS direction: rtl handling:
+        // In `direction: rtl`, the first item is on the right.
+        // So if we Prepend, the new item appears on the right (start of container).
 
-        if (graphContainer.children.length > maxBars) {
-            graphContainer.removeChild(graphContainer.firstChild);
+        graphContainer.prepend(bar);
+
+        // Prune old bars
+        if (graphContainer.children.length > GRAPH_HISTORY_LIMIT) {
+            graphContainer.removeChild(graphContainer.lastChild);
         }
     }
 
@@ -36,29 +84,48 @@ document.addEventListener('DOMContentLoaded', () => {
         fetch('/status')
             .then(response => response.json())
             .then(data => {
-                // Update text
-                scoreValue.textContent = Math.round(data.motion_score).toLocaleString();
-                const videoContainer = document.querySelector('.video-container');
+                const now = Date.now();
+                const score = data.motion_score;
+                const detected = data.motion_detected || score > THRESHOLD;
 
-                if (data.motion_detected) {
-                    statusText.textContent = "BREATHING DETECTED";
+                // Update Values
+                scoreValue.textContent = Math.round(score).toLocaleString();
+
+                // Logic
+                if (detected) {
+                    lastMovementTime = now;
+                    deactivateAlarm(); // Recovery
+
+                    statusText.textContent = "Breathing Active";
                     statusText.style.color = "var(--success-color)";
-                    indicator.style.color = "var(--success-color)";
                     videoOverlayText.textContent = "Live - Active";
-                    videoContainer.classList.add('breathing-active');
+                    videoOverlayText.style.color = "var(--success-color)";
+
+                    indicator.classList.add('active');
                 } else {
-                    statusText.textContent = "IDLE - CHECK BABY";
-                    statusText.style.color = "var(--danger-color)"; // More urgent if no breathing
-                    indicator.style.color = "var(--danger-color)";
-                    videoOverlayText.textContent = "Live - Idle";
-                    videoContainer.classList.remove('breathing-active');
+                    indicator.classList.remove('active');
+
+                    // Check Alarm
+                    if (now - lastMovementTime > ALARM_TIMEOUT) {
+                        activateAlarm();
+                    } else {
+                        // Warning phase
+                        statusText.textContent = `No movement for ${Math.round((now - lastMovementTime) / 1000)}s`;
+                        statusText.style.color = "var(--text-secondary)";
+                        videoOverlayText.textContent = "Live - Idle";
+                        videoOverlayText.style.color = "var(--text-secondary)";
+                    }
                 }
 
-                updateGraph(data.motion_score);
+                updateGraph(score, detected);
             })
-            .catch(err => console.error(err));
+            .catch(err => {
+                console.error("Connection lost", err);
+                statusText.textContent = "CONNECTION LOST";
+                statusText.style.color = "var(--danger-color)";
+            });
     }
 
-    // Poll every 100ms
-    setInterval(fetchStatus, 100);
+    // Start Loop
+    setInterval(fetchStatus, POLLING_RATE);
 });

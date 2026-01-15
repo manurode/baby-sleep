@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Baby Sleep Monitor</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Baby Sleep Monitor</h1>
+            <p class="subtitle">AI-Powered Breathing & Movement Detection</p>
+        </header>
+        
+        <main class="monitor-card">
+            <div class="video-container">
+                <div class="video-overlay">
+                    <div class="indicator-dot"></div>
+                    <span>Initializing...</span>
+                </div>
+                <img src="{{ url_for('video_feed') }}" alt="Live Video Feed">
+            </div>
+            
+            <div class="data-panel">
+                <div class="metric-card">
+                    <span class="metric-label">Status</span>
+                    <span class="metric-value status-text" id="status-text">--</span>
+                </div>
+                <div class="metric-card">
+                    <span class="metric-label">Motion Score</span>
+                    <span class="metric-value" id="score-value">0</span>
+                </div>
+            </div>
+
+            <div class="graph-container" id="motion-graph">
+                <!-- Bars will be inserted here by JS -->
+            </div>
+        </main>
+    </div>
+    
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+</body>
+</html>

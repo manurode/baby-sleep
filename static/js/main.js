@@ -6,6 +6,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const graphContainer = document.getElementById('motion-graph');
     const body = document.body;
     const monitorCard = document.querySelector('.monitor-card');
+    const startOverlay = document.getElementById('start-overlay');
+    const startBtn = document.getElementById('start-btn');
 
     // Configuration
     const THRESHOLD = 500;
@@ -16,6 +18,52 @@ document.addEventListener('DOMContentLoaded', () => {
     // State
     let lastMovementTime = Date.now();
     let isAlarmActive = false;
+
+    // Audio Alarm Logic
+    let audioCtx = null;
+    let alarmTimer = null;
+
+    function initAudio() {
+        if (!audioCtx) {
+            audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        }
+        if (audioCtx.state === 'suspended') {
+            audioCtx.resume();
+        }
+    }
+    // Removed automatic click listener in favor of explicit start button
+    // document.addEventListener('click', initAudio, { once: true });
+
+    function playBeep() {
+        if (!audioCtx) initAudio();
+        if (!audioCtx || audioCtx.state === 'suspended') return;
+
+        const oscillator = audioCtx.createOscillator();
+        const gainNode = audioCtx.createGain();
+
+        oscillator.connect(gainNode);
+        gainNode.connect(audioCtx.destination);
+
+        oscillator.type = 'sine';
+        oscillator.frequency.setValueAtTime(880, audioCtx.currentTime); // A5
+        gainNode.gain.setValueAtTime(0.1, audioCtx.currentTime);
+
+        oscillator.start();
+        oscillator.stop(audioCtx.currentTime + 0.3);
+    }
+
+    function startAlarmSound() {
+        if (alarmTimer) return;
+        playBeep();
+        alarmTimer = setInterval(playBeep, 1000);
+    }
+
+    function stopAlarmSound() {
+        if (alarmTimer) {
+            clearInterval(alarmTimer);
+            alarmTimer = null;
+        }
+    }
 
     function activateAlarm() {
         if (isAlarmActive) return;
@@ -31,6 +79,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         body.classList.add('alarm-active');
         monitorCard.classList.add('alarm-state');
+        startAlarmSound();
     }
 
     function deactivateAlarm() {
@@ -41,6 +90,7 @@ document.addEventListener('DOMContentLoaded', () => {
         indicator.classList.remove('alarm');
         body.classList.remove('alarm-active');
         monitorCard.classList.remove('alarm-state');
+        stopAlarmSound();
     }
 
     function updateGraph(score, detected) {
@@ -126,6 +176,15 @@ document.addEventListener('DOMContentLoaded', () => {
             });
     }
 
-    // Start Loop
-    setInterval(fetchStatus, POLLING_RATE);
+    // Start Logic
+    function startMonitor() {
+        initAudio();
+        startOverlay.classList.add('hidden');
+
+        // Start polling loop
+        fetchStatus();
+        setInterval(fetchStatus, POLLING_RATE);
+    }
+
+    startBtn.addEventListener('click', startMonitor);
 });

@@ -124,6 +124,13 @@ class VideoCamera(object):
 
         # Draw on frame for debug/feed
         status_color = (0, 255, 0) if self.motion_detected else (0, 0, 255)
+        
+        if self.motion_detected:
+            # Find bounding box of all movement
+            x, y, w, h = cv2.boundingRect(thresh)
+            # Draw a fine square (thickness=1)
+            cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 1)
+
         cv2.putText(frame, f"Motion: {self.motion_score}", (10, 30), 
                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, status_color, 2)
                    

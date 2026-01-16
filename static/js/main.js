@@ -294,4 +294,147 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     resetRoiBtn.addEventListener('click', resetRoi);
+
+    // --- Enhancement Controls Logic ---
+    const zoomSlider = document.getElementById('zoom-slider');
+    const contrastSlider = document.getElementById('contrast-slider');
+    const brightnessSlider = document.getElementById('brightness-slider');
+    const zoomValue = document.getElementById('zoom-value');
+    const contrastValue = document.getElementById('contrast-value');
+    const brightnessValue = document.getElementById('brightness-value');
+    const resetEnhancementsBtn = document.getElementById('reset-enhancements-btn');
+
+    // Debounce function to avoid flooding the server
+    function debounce(func, wait) {
+        let timeout;
+        return function executedFunction(...args) {
+            const later = () => {
+                clearTimeout(timeout);
+                func(...args);
+            };
+            clearTimeout(timeout);
+            timeout = setTimeout(later, wait);
+        };
+    }
+
+    // Send enhancement settings to server
+    function sendEnhancements(settings) {
+        fetch('/set_enhancements', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(settings)
+        })
+            .then(res => res.json())
+            .then(data => {
+                if (data.status === 'ok') {
+                    console.log('Enhancements updated:', data);
+                } else {
+                    console.error('Enhancement update failed:', data.message);
+                }
+            })
+            .catch(err => console.error('Failed to set enhancements:', err));
+    }
+
+    // Debounced version for slider input events
+    const debouncedSendEnhancements = debounce(sendEnhancements, 150);
+
+    // Update slider fill visual (pseudo-element workaround)
+    function updateSliderFill(slider) {
+        const min = parseFloat(slider.min);
+        const max = parseFloat(slider.max);
+        const value = parseFloat(slider.value);
+        const percentage = ((value - min) / (max - min)) * 100;
+        slider.style.background = `linear-gradient(to right, var(--accent-color) ${percentage}%, rgba(255, 255, 255, 0.1) ${percentage}%)`;
+    }
+
+    // Zoom slider
+    zoomSlider.addEventListener('input', (e) => {
+        const value = parseFloat(e.target.value);
+        zoomValue.textContent = `${value.toFixed(1)}x`;
+        updateSliderFill(zoomSlider);
+        debouncedSendEnhancements({ zoom: value });
+    });
+
+    // Contrast slider
+    contrastSlider.addEventListener('input', (e) => {
+        const value = parseFloat(e.target.value);
+        contrastValue.textContent = value.toFixed(1);
+        updateSliderFill(contrastSlider);
+        debouncedSendEnhancements({ contrast: value });
+    });
+
+    // Brightness slider
+    brightnessSlider.addEventListener('input', (e) => {
+        const value = parseInt(e.target.value);
+        brightnessValue.textContent = value > 0 ? `+${value}` : value.toString();
+        updateSliderFill(brightnessSlider);
+        debouncedSendEnhancements({ brightness: value });
+    });
+
+    // Reset enhancements
+    resetEnhancementsBtn.addEventListener('click', () => {
+        fetch('/reset_enhancements', { method: 'POST' })
+            .then(res => res.json())
+            .then(data => {
+                if (data.status === 'ok') {
+                    // Reset slider values
+                    zoomSlider.value = 1;
+                    contrastSlider.value = 1;
+                    brightnessSlider.value = 0;
+
+                    // Reset displayed values
+                    zoomValue.textContent = '1.0x';
+                    contrastValue.textContent = '1.0';
+                    brightnessValue.textContent = '0';
+
+                    // Reset slider fills
+                    updateSliderFill(zoomSlider);
+                    updateSliderFill(contrastSlider);
+                    updateSliderFill(brightnessSlider);
+
+                    console.log('Enhancements reset.');
+                }
+            })
+            .catch(err => console.error('Failed to reset enhancements:', err));
+    });
+
+    // Load current settings on page load
+    function loadCurrentSettings() {
+        fetch('/get_settings')
+            .then(res => res.json())
+            .then(data => {
+                // Update sliders
+                zoomSlider.value = data.zoom || 1;
+                contrastSlider.value = data.contrast || 1;
+                brightnessSlider.value = data.brightness || 0;
+
+                // Update displayed values
+                zoomValue.textContent = `${(data.zoom || 1).toFixed(1)}x`;
+                contrastValue.textContent = (data.contrast || 1).toFixed(1);
+                const bright = data.brightness || 0;
+                brightnessValue.textContent = bright > 0 ? `+${bright}` : bright.toString();
+
+                // Update slider fills
+                updateSliderFill(zoomSlider);
+                updateSliderFill(contrastSlider);
+                updateSliderFill(brightnessSlider);
+
+                // Update ROI button visibility
+                if (data.has_roi) {
+                    hasActiveRoi = true;
+                    resetRoiBtn.classList.add('visible');
+                }
+
+                console.log('Settings loaded:', data);
+            })
+            .catch(err => console.error('Failed to load settings:', err));
+    }
+
+    // Initialize slider fills on load
+    updateSliderFill(zoomSlider);
+    updateSliderFill(contrastSlider);
+    updateSliderFill(brightnessSlider);
+
+    // Load settings after a brief delay to ensure camera is initialized
+    setTimeout(loadCurrentSettings, 500);
 });

@@ -44,6 +44,37 @@
                 </div>
             </div>
 
+            <!-- Enhancement Controls -->
+            <div class="enhancement-panel" id="enhancement-panel">
+                <div class="panel-header">
+                    <h3>🔧 Enhancement Controls</h3>
+                    <button class="reset-btn" id="reset-enhancements-btn" title="Reset to defaults">↺ Reset</button>
+                </div>
+                <div class="slider-group">
+                    <div class="slider-item">
+                        <label for="zoom-slider">
+                            <span class="slider-icon">🔍</span> Zoom
+                            <span class="slider-value" id="zoom-value">1.0x</span>
+                        </label>
+                        <input type="range" id="zoom-slider" min="1" max="4" step="0.1" value="1">
+                    </div>
+                    <div class="slider-item">
+                        <label for="contrast-slider">
+                            <span class="slider-icon">◐</span> Contrast
+                            <span class="slider-value" id="contrast-value">1.0</span>
+                        </label>
+                        <input type="range" id="contrast-slider" min="1" max="3" step="0.1" value="1">
+                    </div>
+                    <div class="slider-item">
+                        <label for="brightness-slider">
+                            <span class="slider-icon">☀</span> Brightness
+                            <span class="slider-value" id="brightness-value">0</span>
+                        </label>
+                        <input type="range" id="brightness-slider" min="-50" max="50" step="5" value="0">
+                    </div>
+                </div>
+            </div>
+
             <div class="graph-wrapper">
                 <div class="graph-header">
                     <span>History (Scrollable)</span>

@@ -17,7 +17,7 @@ Build a web-based baby monitor application that uses a webcam to detect breathin
 ## Phase 2: Backend Development (`app.py`)
 - [x] Implement video capture loop using OpenCV.
 - [x] Implement robust movement detection (e.g., Frame differencing).
-- [ ] Create a focused ROI (Region of Interest) mechanism (optional for MVP, but good for "abdominal" specific monitoring).
+- [x] Create a focused ROI (Region of Interest) mechanism.
 - [x] Set up Flask server to stream video feed.
 - [x] Expose an endpoint for "current status" (Movement detected: Yes/No).
 
@@ -30,3 +30,12 @@ Build a web-based baby monitor application that uses a webcam to detect breathin
 ## Phase 4: Refinement
 - [x] Tune sensitivity of motion detection.
 - [x] Polish UI animations.
+
+## Phase 5: Enhanced Breathing Detection (Zoom & Contrast)
+- [x] Add digital zoom feature (1x to 4x) centered on ROI
+- [x] Implement CLAHE (Contrast Limited Adaptive Histogram Equalization) for night vision improvement
+- [x] Add brightness adjustment (-50 to +50)
+- [x] Create premium UI slider controls for real-time adjustments
+- [x] Add API endpoints for enhancement settings (`/set_enhancements`, `/get_settings`, `/reset_enhancements`)
+- [x] Display enhancement info overlay on video feed
+

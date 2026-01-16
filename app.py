@@ -44,6 +44,12 @@ class VideoCamera(object):
         self.roi = None  # Normalized ROI: (x, y, w, h) where values are 0.0-1.0
         self.lock = threading.Lock()
         
+        # Enhancement settings
+        self.zoom_level = 1.0  # 1.0 = no zoom, 2.0 = 2x zoom, etc.
+        self.contrast_level = 1.0  # 1.0 = no enhancement, higher = more CLAHE
+        self.brightness_level = 0  # -50 to +50 adjustment
+        self.clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+        
         try:
             with open("camera_debug.log", "w") as f:
                 f.write("Starting camera init...\n")
@@ -89,8 +95,75 @@ class VideoCamera(object):
     def is_working(self):
         return self.video is not None and self.video.isOpened()
 
+    def apply_enhancements(self, frame):
+        """Apply contrast, brightness and CLAHE enhancements for display."""
+        if self.contrast_level > 1.0 or self.brightness_level != 0:
+            # Convert to LAB color space for better contrast handling
+            lab = cv2.cvtColor(frame, cv2.COLOR_BGR2LAB)
+            l, a, b = cv2.split(lab)
+            
+            # Apply CLAHE with variable clip limit based on contrast level
+            clip_limit = 2.0 * self.contrast_level
+            clahe = cv2.createCLAHE(clipLimit=clip_limit, tileGridSize=(8, 8))
+            l = clahe.apply(l)
+            
+            # Apply brightness adjustment
+            if self.brightness_level != 0:
+                l = cv2.add(l, self.brightness_level)
+            
+            # Merge and convert back
+            lab = cv2.merge([l, a, b])
+            frame = cv2.cvtColor(lab, cv2.COLOR_LAB2BGR)
+        
+        return frame
+
+    def apply_zoom(self, frame, roi_pixel=None):
+        """Apply digital zoom to frame, centered on ROI if available."""
+        if self.zoom_level <= 1.0:
+            return frame
+        
+        h, w = frame.shape[:2]
+        
+        # Determine zoom center
+        if roi_pixel is not None:
+            rx, ry, rw, rh = roi_pixel
+            center_x = rx + rw // 2
+            center_y = ry + rh // 2
+        else:
+            center_x = w // 2
+            center_y = h // 2
+        
+        # Calculate zoomed region size
+        zoom_w = int(w / self.zoom_level)
+        zoom_h = int(h / self.zoom_level)
+        
+        # Calculate crop bounds, keeping center in view
+        x1 = max(0, center_x - zoom_w // 2)
+        y1 = max(0, center_y - zoom_h // 2)
+        x2 = min(w, x1 + zoom_w)
+        y2 = min(h, y1 + zoom_h)
+        
+        # Adjust if we hit the edge
+        if x2 == w:
+            x1 = w - zoom_w
+        if y2 == h:
+            y1 = h - zoom_h
+        
+        # Ensure bounds are valid
+        x1 = max(0, x1)
+        y1 = max(0, y1)
+        
+        # Crop and resize back to original size
+        cropped = frame[y1:y2, x1:x2]
+        zoomed = cv2.resize(cropped, (w, h), interpolation=cv2.INTER_LINEAR)
+        
+        return zoomed
+
     def process_frame(self, frame):
+        """Process frame for motion detection (grayscale + blur)."""
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        # Apply CLAHE for better motion detection in low-light
+        gray = self.clahe.apply(gray)
         gray = cv2.GaussianBlur(gray, (21, 21), 0)
         return gray
 
@@ -157,9 +230,27 @@ class VideoCamera(object):
 
         cv2.putText(frame, f"Motion: {self.motion_score}", (10, 30), 
                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, status_color, 2)
-                   
-        # Resize for performance if needed, but 640x480 is standard
         
+        # Apply visual enhancements (after motion detection, for display only)
+        frame = self.apply_enhancements(frame)
+        
+        # Apply digital zoom (centered on ROI if available)
+        frame = self.apply_zoom(frame, roi_pixel)
+        
+        # Show zoom/enhancement info overlay
+        info_texts = []
+        if self.zoom_level > 1.0:
+            info_texts.append(f"Zoom: {self.zoom_level:.1f}x")
+        if self.contrast_level > 1.0:
+            info_texts.append(f"Contrast: {self.contrast_level:.1f}")
+        if self.brightness_level != 0:
+            info_texts.append(f"Bright: {self.brightness_level:+d}")
+        
+        if info_texts:
+            info_str = " | ".join(info_texts)
+            cv2.putText(frame, info_str, (10, frame.shape[0] - 15), 
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+                   
         ret, jpeg = cv2.imencode('.jpg', frame)
         return jpeg.tobytes()
 
@@ -242,5 +333,83 @@ def reset_roi():
     print("ROI cleared.")
     return jsonify({'status': 'ok'})
 
+@app.route('/set_enhancements', methods=['POST'])
+def set_enhancements():
+    """Set zoom, contrast, and brightness enhancement levels."""
+    cam = get_camera()
+    data = request.get_json()
+    
+    if not data:
+        return jsonify({'status': 'error', 'message': 'No data provided'}), 400
+    
+    # Update only provided values
+    if 'zoom' in data:
+        zoom = float(data['zoom'])
+        if 1.0 <= zoom <= 4.0:
+            cam.zoom_level = zoom
+            print(f"Zoom set to: {zoom}")
+        else:
+            return jsonify({'status': 'error', 'message': 'Zoom must be between 1.0 and 4.0'}), 400
+    
+    if 'contrast' in data:
+        contrast = float(data['contrast'])
+        if 1.0 <= contrast <= 3.0:
+            cam.contrast_level = contrast
+            print(f"Contrast set to: {contrast}")
+        else:
+            return jsonify({'status': 'error', 'message': 'Contrast must be between 1.0 and 3.0'}), 400
+    
+    if 'brightness' in data:
+        brightness = int(data['brightness'])
+        if -50 <= brightness <= 50:
+            cam.brightness_level = brightness
+            print(f"Brightness set to: {brightness}")
+        else:
+            return jsonify({'status': 'error', 'message': 'Brightness must be between -50 and 50'}), 400
+    
+    return jsonify({
+        'status': 'ok',
+        'zoom': cam.zoom_level,
+        'contrast': cam.contrast_level,
+        'brightness': cam.brightness_level
+    })
+
+@app.route('/get_settings')
+def get_settings():
+    """Get current camera enhancement settings."""
+    cam = get_camera()
+    
+    # Handle MockCamera which doesn't have enhancement settings
+    if isinstance(cam, MockCamera):
+        return jsonify({
+            'zoom': 1.0,
+            'contrast': 1.0,
+            'brightness': 0,
+            'has_roi': False,
+            'roi': None
+        })
+    
+    return jsonify({
+        'zoom': cam.zoom_level,
+        'contrast': cam.contrast_level,
+        'brightness': cam.brightness_level,
+        'has_roi': cam.roi is not None,
+        'roi': cam.roi
+    })
+
+@app.route('/reset_enhancements', methods=['POST'])
+def reset_enhancements():
+    """Reset all enhancements to default values."""
+    cam = get_camera()
+    
+    if isinstance(cam, VideoCamera):
+        cam.zoom_level = 1.0
+        cam.contrast_level = 1.0
+        cam.brightness_level = 0
+        print("Enhancements reset to defaults.")
+    
+    return jsonify({'status': 'ok'})
+
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True, use_reloader=False)
+

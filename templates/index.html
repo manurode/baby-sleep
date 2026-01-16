@@ -26,7 +26,11 @@
                     <div class="indicator-dot"></div>
                     <span>Initializing...</span>
                 </div>
-                <img src="{{ url_for('video_feed') }}" alt="Live Video Feed">
+                <div class="roi-overlay" id="roi-overlay">
+                    <div class="selection-box" id="selection-box"></div>
+                </div>
+                <img src="{{ url_for('video_feed') }}" alt="Live Video Feed" id="video-feed">
+                <button class="reset-roi-btn" id="reset-roi-btn" title="Reset ROI">✕ Reset ROI</button>
             </div>
 
             <div class="data-panel">

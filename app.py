@@ -2,7 +2,7 @@ import cv2
 import time
 import threading
 import numpy as np
-from flask import Flask, render_template, Response, jsonify
+from flask import Flask, render_template, Response, jsonify, request
 
 app = Flask(__name__)
 
@@ -41,6 +41,7 @@ class VideoCamera(object):
         self.last_frame = None
         self.motion_detected = False
         self.motion_score = 0
+        self.roi = None  # Normalized ROI: (x, y, w, h) where values are 0.0-1.0
         self.lock = threading.Lock()
         
         try:
@@ -101,7 +102,8 @@ class VideoCamera(object):
         
         if not ret:
             return None
-            
+        
+        h, w = frame.shape[:2]
         current_gray = self.process_frame(frame)
         
         if self.last_frame is None:
@@ -114,6 +116,22 @@ class VideoCamera(object):
         thresh = cv2.threshold(frame_delta, 5, 255, cv2.THRESH_BINARY)[1]
         thresh = cv2.dilate(thresh, None, iterations=2)
         
+        # Apply ROI mask if set
+        roi_pixel = None
+        if self.roi is not None:
+            rx, ry, rw, rh = self.roi
+            # Convert normalized coords to pixel coords
+            roi_x = int(rx * w)
+            roi_y = int(ry * h)
+            roi_w = int(rw * w)
+            roi_h = int(rh * h)
+            roi_pixel = (roi_x, roi_y, roi_w, roi_h)
+            
+            # Create mask - only the ROI area is white
+            mask = np.zeros(thresh.shape, dtype=np.uint8)
+            mask[roi_y:roi_y+roi_h, roi_x:roi_x+roi_w] = 255
+            thresh = cv2.bitwise_and(thresh, mask)
+        
         # Calculate motion score (sum of white pixels)
         self.motion_score = np.sum(thresh)
         # Lower score threshold (was 5000) - Breathing is very subtle
@@ -125,11 +143,17 @@ class VideoCamera(object):
         # Draw on frame for debug/feed
         status_color = (0, 255, 0) if self.motion_detected else (0, 0, 255)
         
+        # Draw ROI rectangle if set
+        if roi_pixel is not None:
+            roi_x, roi_y, roi_w, roi_h = roi_pixel
+            # Draw ROI box in cyan
+            cv2.rectangle(frame, (roi_x, roi_y), (roi_x + roi_w, roi_y + roi_h), (255, 255, 0), 2)
+        
         if self.motion_detected:
-            # Find bounding box of all movement
-            x, y, w, h = cv2.boundingRect(thresh)
+            # Find bounding box of all movement (within ROI if set)
+            x, y, bw, bh = cv2.boundingRect(thresh)
             # Draw a fine square (thickness=1)
-            cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 1)
+            cv2.rectangle(frame, (x, y), (x + bw, y + bh), (0, 255, 0), 1)
 
         cv2.putText(frame, f"Motion: {self.motion_score}", (10, 30), 
                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, status_color, 2)
@@ -192,6 +216,31 @@ def status():
         'motion_detected': bool(cam.motion_detected),
         'motion_score': float(cam.motion_score)
     })
+
+@app.route('/set_roi', methods=['POST'])
+def set_roi():
+    """Set the Region of Interest for motion detection."""
+    cam = get_camera()
+    data = request.get_json()
+    if data and all(k in data for k in ['x', 'y', 'w', 'h']):
+        x = float(data['x'])
+        y = float(data['y'])
+        w = float(data['w'])
+        h = float(data['h'])
+        # Basic validation
+        if 0 <= x <= 1 and 0 <= y <= 1 and w > 0 and h > 0:
+            cam.roi = (x, y, w, h)
+            print(f"ROI set to: {cam.roi}")
+            return jsonify({'status': 'ok', 'roi': cam.roi})
+    return jsonify({'status': 'error', 'message': 'Invalid ROI data'}), 400
+
+@app.route('/reset_roi', methods=['POST'])
+def reset_roi():
+    """Clear the Region of Interest."""
+    cam = get_camera()
+    cam.roi = None
+    print("ROI cleared.")
+    return jsonify({'status': 'ok'})
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True, use_reloader=False)

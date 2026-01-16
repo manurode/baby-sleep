@@ -9,6 +9,11 @@ document.addEventListener('DOMContentLoaded', () => {
     const startOverlay = document.getElementById('start-overlay');
     const startBtn = document.getElementById('start-btn');
 
+    // ROI Elements
+    const roiOverlay = document.getElementById('roi-overlay');
+    const selectionBox = document.getElementById('selection-box');
+    const resetRoiBtn = document.getElementById('reset-roi-btn');
+
     // Configuration
     const THRESHOLD = 500;
     const POLLING_RATE = 200; // ms (Poll less frequently for performance)
@@ -18,6 +23,12 @@ document.addEventListener('DOMContentLoaded', () => {
     // State
     let lastMovementTime = Date.now();
     let isAlarmActive = false;
+
+    // ROI State
+    let isDrawingRoi = false;
+    let roiStartX = 0;
+    let roiStartY = 0;
+    let hasActiveRoi = false;
 
     // Audio Alarm Logic
     let audioCtx = null;
@@ -187,4 +198,100 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     startBtn.addEventListener('click', startMonitor);
+
+    // --- ROI Selection Logic ---
+    function sendRoiToServer(x, y, w, h) {
+        fetch('/set_roi', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ x, y, w, h })
+        })
+            .then(res => res.json())
+            .then(data => {
+                if (data.status === 'ok') {
+                    hasActiveRoi = true;
+                    resetRoiBtn.classList.add('visible');
+                    console.log('ROI set:', data.roi);
+                }
+            })
+            .catch(err => console.error('Failed to set ROI:', err));
+    }
+
+    function resetRoi() {
+        fetch('/reset_roi', { method: 'POST' })
+            .then(res => res.json())
+            .then(data => {
+                if (data.status === 'ok') {
+                    hasActiveRoi = false;
+                    resetRoiBtn.classList.remove('visible');
+                    console.log('ROI cleared.');
+                }
+            })
+            .catch(err => console.error('Failed to reset ROI:', err));
+    }
+
+    roiOverlay.addEventListener('mousedown', (e) => {
+        const rect = roiOverlay.getBoundingClientRect();
+        roiStartX = e.clientX - rect.left;
+        roiStartY = e.clientY - rect.top;
+        isDrawingRoi = true;
+        selectionBox.style.left = `${roiStartX}px`;
+        selectionBox.style.top = `${roiStartY}px`;
+        selectionBox.style.width = '0';
+        selectionBox.style.height = '0';
+        selectionBox.classList.add('active');
+    });
+
+    roiOverlay.addEventListener('mousemove', (e) => {
+        if (!isDrawingRoi) return;
+        const rect = roiOverlay.getBoundingClientRect();
+        const currentX = e.clientX - rect.left;
+        const currentY = e.clientY - rect.top;
+
+        const left = Math.min(roiStartX, currentX);
+        const top = Math.min(roiStartY, currentY);
+        const width = Math.abs(currentX - roiStartX);
+        const height = Math.abs(currentY - roiStartY);
+
+        selectionBox.style.left = `${left}px`;
+        selectionBox.style.top = `${top}px`;
+        selectionBox.style.width = `${width}px`;
+        selectionBox.style.height = `${height}px`;
+    });
+
+    roiOverlay.addEventListener('mouseup', (e) => {
+        if (!isDrawingRoi) return;
+        isDrawingRoi = false;
+        selectionBox.classList.remove('active');
+
+        const rect = roiOverlay.getBoundingClientRect();
+        const currentX = e.clientX - rect.left;
+        const currentY = e.clientY - rect.top;
+
+        const left = Math.min(roiStartX, currentX);
+        const top = Math.min(roiStartY, currentY);
+        const width = Math.abs(currentX - roiStartX);
+        const height = Math.abs(currentY - roiStartY);
+
+        // Calculate normalized coordinates (0-1)
+        const normX = left / rect.width;
+        const normY = top / rect.height;
+        const normW = width / rect.width;
+        const normH = height / rect.height;
+
+        // Minimum size check to avoid accidental clicks
+        if (normW > 0.02 && normH > 0.02) {
+            sendRoiToServer(normX, normY, normW, normH);
+        }
+    });
+
+    // Handle mouse leaving the overlay while drawing
+    roiOverlay.addEventListener('mouseleave', () => {
+        if (isDrawingRoi) {
+            isDrawingRoi = false;
+            selectionBox.classList.remove('active');
+        }
+    });
+
+    resetRoiBtn.addEventListener('click', resetRoi);
 });

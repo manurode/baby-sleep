@@ -106,3 +106,50 @@ The `/status` endpoint now returns:
     "seconds_since_motion": 2
 }
 ```
+
+## Phase 7: Native Android UI (Replace WebView)
+
+### Goal
+Replace the WebView-based implementation with native Android components for improved performance, reliability, and to fix the "stream freezing" issue.
+
+### Changes Made
+
+#### New Files Created
+- [x] `data/StatusResponse.kt` - Shared data model for /status response
+- [x] `data/SettingsResponse.kt` - Data model for /get_settings response
+- [x] `network/ApiClient.kt` - Singleton with suspend functions for all API calls
+- [x] `network/MjpegInputStream.kt` - MJPEG stream parser (extracts JPEG frames)
+- [x] `drawable/overlay_background.xml` - Semi-transparent overlay for status display
+- [x] `drawable/fab_background.xml` - Circular button background
+
+#### Modified Files
+- [x] `activity_main.xml` - Replaced WebView with:
+  - ImageView for native video display
+  - Status overlay (motion score, alarm status, connection status)
+  - Collapsible controls panel (zoom, contrast, brightness sliders)
+  - Alarm overlay (full-screen red warning)
+- [x] `MainActivity.kt` - Complete rewrite:
+  - Removed WebView setup
+  - Added MJPEG streaming with coroutines (Dispatchers.IO)
+  - Implemented exponential backoff reconnection (1s → 30s max)
+  - Added real-time status polling (every 1.5s)
+  - Added enhancement controls (zoom, contrast, brightness)
+- [x] `MonitoringService.kt` - Use shared StatusResponse model
+
+#### Key Improvements
+1. **Native MJPEG Client**: Parses raw JPEG frames from `/video_feed` stream
+2. **Robust Reconnection**: Exponential backoff prevents connection hammering
+3. **Real-time Status**: Motion score and alarm state updated via `/status` endpoint
+4. **Enhancement Controls**: Native sliders for zoom (1-4x), contrast (1-3), brightness (-50 to +50)
+5. **Coroutine-based**: All network operations use Kotlin coroutines
+
+### Verification Plan
+- [ ] Build and install the app
+- [ ] Connect to server - verify video appears
+- [ ] Verify video updates (move hand in front of camera)
+- [ ] Let run for 5+ minutes - verify no freezes
+- [ ] Test network disconnect/reconnect - verify recovery
+- [ ] Test zoom slider - verify zoom changes on video
+- [ ] Test contrast/brightness sliders
+- [ ] Verify alarm overlay appears when no motion for 10s
+- [ ] Verify background monitoring still works

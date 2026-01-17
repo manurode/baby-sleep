@@ -17,11 +17,11 @@ document.addEventListener('DOMContentLoaded', () => {
     // Configuration
     const THRESHOLD = 500;
     const POLLING_RATE = 200; // ms (Poll less frequently for performance)
-    const ALARM_TIMEOUT = 10000; // 10 seconds of no movement
+    // ALARM_TIMEOUT removed - now handled by server
     const GRAPH_HISTORY_LIMIT = 200; // Keep 200 bars in DOM
 
     // State
-    let lastMovementTime = Date.now();
+    // lastMovementTime removed - now tracked by server
     let isAlarmActive = false;
 
     // ROI State
@@ -145,16 +145,22 @@ document.addEventListener('DOMContentLoaded', () => {
         fetch('/status')
             .then(response => response.json())
             .then(data => {
-                const now = Date.now();
                 const score = data.motion_score;
                 const detected = data.motion_detected || score > THRESHOLD;
+                const alarmFromServer = data.alarm_active;
+                const secondsSinceMotion = data.seconds_since_motion;
 
                 // Update Values
                 scoreValue.textContent = Math.round(score).toLocaleString();
 
-                // Logic
-                if (detected) {
-                    lastMovementTime = now;
+                // Use server's alarm state for centralized alarm logic
+                if (alarmFromServer) {
+                    activateAlarm();
+                    statusText.textContent = "ALARM: NO MOVEMENT DETECTED!";
+                    statusText.style.color = "var(--danger-color)";
+                    videoOverlayText.textContent = "ALARM - CHECK BABY";
+                    videoOverlayText.style.color = "var(--danger-color)";
+                } else if (detected) {
                     deactivateAlarm(); // Recovery
 
                     statusText.textContent = "Breathing Active";
@@ -165,17 +171,13 @@ document.addEventListener('DOMContentLoaded', () => {
                     indicator.classList.add('active');
                 } else {
                     indicator.classList.remove('active');
+                    deactivateAlarm(); // Not yet alarm
 
-                    // Check Alarm
-                    if (now - lastMovementTime > ALARM_TIMEOUT) {
-                        activateAlarm();
-                    } else {
-                        // Warning phase
-                        statusText.textContent = `No movement for ${Math.round((now - lastMovementTime) / 1000)}s`;
-                        statusText.style.color = "var(--text-secondary)";
-                        videoOverlayText.textContent = "Live - Idle";
-                        videoOverlayText.style.color = "var(--text-secondary)";
-                    }
+                    // Warning phase - show countdown
+                    statusText.textContent = `No movement for ${secondsSinceMotion}s`;
+                    statusText.style.color = "var(--text-secondary)";
+                    videoOverlayText.textContent = "Live - Idle";
+                    videoOverlayText.style.color = "var(--text-secondary)";
                 }
 
                 updateGraph(score, detected);

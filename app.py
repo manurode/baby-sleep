@@ -8,10 +8,13 @@ app = Flask(__name__)
 
 class MockCamera(object):
     """Simulates a camera feed for testing when no physical camera is available."""
+    ALARM_TIMEOUT_SECONDS = 10  # Same as VideoCamera
+    
     def __init__(self):
         self.motion_detected = False
         self.motion_score = 0
         self.frame_count = 0
+        self.last_motion_time = time.time()
         print("Initializing Mock Camera (Simulation Mode)...")
 
     def get_frame(self):
@@ -32,10 +35,24 @@ class MockCamera(object):
         self.motion_score = 8000 * abs(np.sin(self.frame_count * 0.1))
         self.motion_detected = self.motion_score > 5000
         
+        # Update last_motion_time if motion is detected
+        if self.motion_detected:
+            self.last_motion_time = time.time()
+        
         ret, jpeg = cv2.imencode('.jpg', img)
         return jpeg.tobytes()
+    
+    def is_alarm_active(self):
+        """Check if alarm should be active (no motion for ALARM_TIMEOUT_SECONDS)."""
+        return (time.time() - self.last_motion_time) > self.ALARM_TIMEOUT_SECONDS
+    
+    def get_seconds_since_motion(self):
+        """Get the number of seconds since last motion was detected."""
+        return int(time.time() - self.last_motion_time)
 
 class VideoCamera(object):
+    ALARM_TIMEOUT_SECONDS = 10  # Trigger alarm after 10 seconds of no motion
+    
     def __init__(self):
         self.video = None
         self.last_frame = None
@@ -43,6 +60,7 @@ class VideoCamera(object):
         self.motion_score = 0
         self.roi = None  # Normalized ROI: (x, y, w, h) where values are 0.0-1.0
         self.lock = threading.Lock()
+        self.last_motion_time = time.time()  # Track when motion was last detected
         
         # Enhancement settings
         self.zoom_level = 1.0  # 1.0 = no zoom, 2.0 = 2x zoom, etc.
@@ -210,6 +228,10 @@ class VideoCamera(object):
         # Lower score threshold (was 5000) - Breathing is very subtle
         self.motion_detected = self.motion_score > 500 # Highly sensitive
         
+        # Update last_motion_time if motion is detected
+        if self.motion_detected:
+            self.last_motion_time = time.time()
+        
         # Update last frame
         self.last_frame = current_gray
 
@@ -253,6 +275,14 @@ class VideoCamera(object):
                    
         ret, jpeg = cv2.imencode('.jpg', frame)
         return jpeg.tobytes()
+
+    def is_alarm_active(self):
+        """Check if alarm should be active (no motion for ALARM_TIMEOUT_SECONDS)."""
+        return (time.time() - self.last_motion_time) > self.ALARM_TIMEOUT_SECONDS
+    
+    def get_seconds_since_motion(self):
+        """Get the number of seconds since last motion was detected."""
+        return int(time.time() - self.last_motion_time)
 
     def __del__(self):
         if self.video and self.video.isOpened():
@@ -305,7 +335,9 @@ def status():
     cam = get_camera()
     return jsonify({
         'motion_detected': bool(cam.motion_detected),
-        'motion_score': float(cam.motion_score)
+        'motion_score': float(cam.motion_score),
+        'alarm_active': cam.is_alarm_active(),
+        'seconds_since_motion': cam.get_seconds_since_motion()
     })
 
 @app.route('/set_roi', methods=['POST'])

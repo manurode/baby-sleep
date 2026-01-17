@@ -8,6 +8,7 @@ Build a web-based baby monitor application that uses a webcam to detect breathin
 - **Computer Vision**: OpenCV (`cv2`) for movement detection.
 - **Frontend**: HTML5, Vanilla CSS (Premium Design), JavaScript.
 - **Communication**: MJPEG streaming for video, REST/polling for status updates.
+- **Mobile**: Native Android App (Kotlin) for background monitoring and notifications.
 
 ## Phase 1: Environment & Setup
 - [x] Create virtual environment (`venv`)
@@ -39,3 +40,69 @@ Build a web-based baby monitor application that uses a webcam to detect breathin
 - [x] Add API endpoints for enhancement settings (`/set_enhancements`, `/get_settings`, `/reset_enhancements`)
 - [x] Display enhancement info overlay on video feed
 
+## Phase 6: Android App & Centralized Alarm Logic
+
+### Goal
+Allow monitoring the baby's status via a dedicated Android App that can run in the background and issue system notifications when breathing stops (no movement detected). Currently, this logic resides in the web browser, which stops working if the phone screen turns off or the browser is backgrounded.
+
+### Backend Changes (Python/Flask)
+- [x] Move the "10 seconds no movement" timer from `main.js` to `app.py`
+- [x] Add `last_motion_time` timestamp tracking in VideoCamera class
+- [x] Add `last_motion_time` tracking in MockCamera class
+- [x] Update `get_frame()` to update timestamp when motion_score > threshold
+- [x] Add `is_alarm_active()` method: returns True if `(now - last_motion_time) > 10 seconds`
+- [x] Add `get_seconds_since_motion()` method
+- [x] Update `/status` route to include `alarm_active` and `seconds_since_motion` in JSON response
+
+### Frontend Changes (Web)
+- [x] Remove local `lastMovementTime` and `setTimeout` logic for the alarm
+- [x] Update `fetchStatus()` to read `alarm_active` from the server response
+- [x] Trigger UI Red Alert/Sound based on server `alarm_active` state
+
+### Android App (New Project)
+- [x] Create Android Studio project structure (Kotlin)
+- [x] Configure Gradle with dependencies (OkHttp, Gson)
+- [x] Create AndroidManifest with permissions:
+  - [x] INTERNET, FOREGROUND_SERVICE, POST_NOTIFICATIONS, VIBRATE, WAKE_LOCK
+- [x] Implement MainActivity with WebView for full web interface
+- [x] Implement MonitoringService (ForegroundService) for background polling
+- [x] Implement high-priority notification channel for alarms
+- [x] Implement vibration and sound alerts
+- [x] Create SettingsActivity for server URL configuration
+- [x] Create BootReceiver for optional auto-start on device boot
+- [x] Design premium dark theme matching web interface
+- [x] Create comprehensive README with build instructions
+
+### Verification Plan
+- [x] **Automated Tests**: Use curl to query `/status` while blocking the camera (or using Mock Camera) to verify `alarm_active` switches to true after 10 seconds.
+  - ✅ Tested with curl - `/status` returns `alarm_active: true` when no motion detected for 10+ seconds
+- [x] **Manual Verification - Backend**: Cover camera → Wait 10s → Check `/status` JSON in browser.
+  - ✅ Confirmed JSON response includes `alarm_active` and `seconds_since_motion` fields
+- [x] **Manual Verification - Web**: Verify the red screen still appears correctly.
+  - ✅ Tested in browser - Red alarm screen with "ALARM: NO MOVEMENT DETECTED!" text works correctly
+- [ ] **Manual Verification - Android**:
+  - [ ] Build and install the app.
+  - [ ] Close the app (Home button).
+  - [ ] Stop movement in front of camera.
+  - [ ] Verify Android System Notification appears.
+  - ⚠️ Requires Android Studio + physical device to test
+
+---
+
+## Notes
+
+### Server URL Format
+The Android app connects to the Flask server using: `http://<IP_ADDRESS>:5000`
+
+For example: `http://192.168.1.100:5000`
+
+### API Response Format
+The `/status` endpoint now returns:
+```json
+{
+    "motion_detected": true,
+    "motion_score": 1234.5,
+    "alarm_active": false,
+    "seconds_since_motion": 2
+}
+```

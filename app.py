@@ -52,6 +52,7 @@ class MockCamera(object):
 
 class VideoCamera(object):
     ALARM_TIMEOUT_SECONDS = 10  # Trigger alarm after 10 seconds of no motion
+    PROCESSING_FPS = 5  # Process motion detection at 5 FPS in background
     
     def __init__(self):
         self.video = None
@@ -67,6 +68,12 @@ class VideoCamera(object):
         self.contrast_level = 1.0  # 1.0 = no enhancement, higher = more CLAHE
         self.brightness_level = 0  # -50 to +50 adjustment
         self.clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+        
+        # Background processing state
+        self._running = False
+        self._processing_thread = None
+        self._latest_raw_frame = None  # Latest raw frame for display
+        self._frame_lock = threading.Lock()
         
         try:
             with open("camera_debug.log", "w") as f:
@@ -93,9 +100,13 @@ class VideoCamera(object):
                     self.video = None
                 else:
                     self.last_frame = self.process_frame(frame)
+                    self._latest_raw_frame = frame.copy()
                     msg = "Camera initialized successfully!"
                     print(msg)
                     with open("camera_debug.log", "a") as f: f.write(msg + "\n")
+                    
+                    # Start background processing thread
+                    self._start_background_processing()
                     
         except Exception as e:
             msg = f"CRITICAL ERROR initializing camera: {e}"
@@ -109,6 +120,92 @@ class VideoCamera(object):
         # The get_camera() function will see self.video is None (or we handle it here)
         # But actually, the previous logic relied on an exception to switch to MockCamera.
         # We need to ensure logic flow handles failures without crashing.
+    
+    def _start_background_processing(self):
+        """Start the background thread for continuous motion detection."""
+        if self._running:
+            return
+        self._running = True
+        self._processing_thread = threading.Thread(target=self._background_loop, daemon=True)
+        self._processing_thread.start()
+        print("Background motion detection thread started.")
+    
+    def _stop_background_processing(self):
+        """Stop the background processing thread."""
+        self._running = False
+        if self._processing_thread and self._processing_thread.is_alive():
+            self._processing_thread.join(timeout=2.0)
+        print("Background motion detection thread stopped.")
+    
+    def _background_loop(self):
+        """
+        Continuous loop that captures frames and processes motion detection.
+        This runs independently of whether any client is viewing the stream.
+        """
+        frame_interval = 1.0 / self.PROCESSING_FPS
+        
+        while self._running:
+            start_time = time.time()
+            
+            try:
+                with self.lock:
+                    if not self.video or not self.video.isOpened():
+                        break
+                    ret, frame = self.video.read()
+                
+                if ret and frame is not None:
+                    # Store raw frame for display
+                    with self._frame_lock:
+                        self._latest_raw_frame = frame.copy()
+                    
+                    # Process for motion detection
+                    self._process_motion(frame)
+                    
+            except Exception as e:
+                print(f"Error in background processing: {e}")
+            
+            # Maintain target FPS
+            elapsed = time.time() - start_time
+            if elapsed < frame_interval:
+                time.sleep(frame_interval - elapsed)
+    
+    def _process_motion(self, frame):
+        """Process a frame for motion detection (updates motion state)."""
+        h, w = frame.shape[:2]
+        current_gray = self.process_frame(frame)
+        
+        if self.last_frame is None:
+            self.last_frame = current_gray
+            return
+        
+        # Compute difference
+        frame_delta = cv2.absdiff(self.last_frame, current_gray)
+        # Tune sensitivity for breathing detection
+        thresh = cv2.threshold(frame_delta, 5, 255, cv2.THRESH_BINARY)[1]
+        thresh = cv2.dilate(thresh, None, iterations=2)
+        
+        # Apply ROI mask if set
+        if self.roi is not None:
+            rx, ry, rw, rh = self.roi
+            roi_x = int(rx * w)
+            roi_y = int(ry * h)
+            roi_w = int(rw * w)
+            roi_h = int(rh * h)
+            
+            mask = np.zeros(thresh.shape, dtype=np.uint8)
+            mask[roi_y:roi_y+roi_h, roi_x:roi_x+roi_w] = 255
+            thresh = cv2.bitwise_and(thresh, mask)
+        
+        # Calculate motion score (sum of white pixels)
+        self.motion_score = np.sum(thresh)
+        self.motion_detected = self.motion_score > 500
+        
+        # Update last_motion_time if motion is detected
+        if self.motion_detected:
+            self.last_motion_time = time.time()
+        
+        # Update last frame
+        self.last_frame = current_gray
     
     def is_working(self):
         return self.video is not None and self.video.isOpened()
@@ -186,54 +283,28 @@ class VideoCamera(object):
         return gray
 
     def get_frame(self):
-        with self.lock:
-            if not self.video or not self.video.isOpened():
+        """
+        Get the latest frame for display.
+        Motion detection is handled by the background thread.
+        This method only handles display rendering (overlays, enhancements, zoom).
+        """
+        # Get the latest frame from background thread
+        with self._frame_lock:
+            if self._latest_raw_frame is None:
                 return None
-            ret, frame = self.video.read()
-        
-        if not ret:
-            return None
+            frame = self._latest_raw_frame.copy()
         
         h, w = frame.shape[:2]
-        current_gray = self.process_frame(frame)
         
-        if self.last_frame is None:
-            self.last_frame = current_gray
-            
-        # Compute difference
-        frame_delta = cv2.absdiff(self.last_frame, current_gray)
-        # Tune sensitivity for breathing detection
-        # Lower threshold for pixel differences (was 25)
-        thresh = cv2.threshold(frame_delta, 5, 255, cv2.THRESH_BINARY)[1]
-        thresh = cv2.dilate(thresh, None, iterations=2)
-        
-        # Apply ROI mask if set
+        # Calculate ROI pixel coordinates for display
         roi_pixel = None
         if self.roi is not None:
             rx, ry, rw, rh = self.roi
-            # Convert normalized coords to pixel coords
             roi_x = int(rx * w)
             roi_y = int(ry * h)
             roi_w = int(rw * w)
             roi_h = int(rh * h)
             roi_pixel = (roi_x, roi_y, roi_w, roi_h)
-            
-            # Create mask - only the ROI area is white
-            mask = np.zeros(thresh.shape, dtype=np.uint8)
-            mask[roi_y:roi_y+roi_h, roi_x:roi_x+roi_w] = 255
-            thresh = cv2.bitwise_and(thresh, mask)
-        
-        # Calculate motion score (sum of white pixels)
-        self.motion_score = np.sum(thresh)
-        # Lower score threshold (was 5000) - Breathing is very subtle
-        self.motion_detected = self.motion_score > 500 # Highly sensitive
-        
-        # Update last_motion_time if motion is detected
-        if self.motion_detected:
-            self.last_motion_time = time.time()
-        
-        # Update last frame
-        self.last_frame = current_gray
 
         # Draw on frame for debug/feed
         status_color = (0, 255, 0) if self.motion_detected else (0, 0, 255)
@@ -241,22 +312,32 @@ class VideoCamera(object):
         # Draw ROI rectangle if set
         if roi_pixel is not None:
             roi_x, roi_y, roi_w, roi_h = roi_pixel
-            # Draw ROI box in cyan
             cv2.rectangle(frame, (roi_x, roi_y), (roi_x + roi_w, roi_y + roi_h), (255, 255, 0), 2)
         
+        # Draw motion bounding box if motion detected
         if self.motion_detected:
-            # Find bounding box of all movement (within ROI if set)
-            x, y, bw, bh = cv2.boundingRect(thresh)
-            # Draw a fine square (thickness=1)
-            cv2.rectangle(frame, (x, y), (x + bw, y + bh), (0, 255, 0), 1)
+            # Process current frame to get motion bounds for display
+            current_gray = self.process_frame(frame)
+            if self.last_frame is not None:
+                frame_delta = cv2.absdiff(self.last_frame, current_gray)
+                thresh = cv2.threshold(frame_delta, 5, 255, cv2.THRESH_BINARY)[1]
+                thresh = cv2.dilate(thresh, None, iterations=2)
+                
+                if roi_pixel is not None:
+                    mask = np.zeros(thresh.shape, dtype=np.uint8)
+                    mask[roi_pixel[1]:roi_pixel[1]+roi_pixel[3], roi_pixel[0]:roi_pixel[0]+roi_pixel[2]] = 255
+                    thresh = cv2.bitwise_and(thresh, mask)
+                
+                x, y, bw, bh = cv2.boundingRect(thresh)
+                cv2.rectangle(frame, (x, y), (x + bw, y + bh), (0, 255, 0), 1)
 
-        cv2.putText(frame, f"Motion: {self.motion_score}", (10, 30), 
+        cv2.putText(frame, f"Motion: {int(self.motion_score)}", (10, 30), 
                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, status_color, 2)
         
-        # Apply visual enhancements (after motion detection, for display only)
+        # Apply visual enhancements
         frame = self.apply_enhancements(frame)
         
-        # Apply digital zoom (centered on ROI if available)
+        # Apply digital zoom
         frame = self.apply_zoom(frame, roi_pixel)
         
         # Show zoom/enhancement info overlay
@@ -285,6 +366,7 @@ class VideoCamera(object):
         return int(time.time() - self.last_motion_time)
 
     def __del__(self):
+        self._stop_background_processing()
         if self.video and self.video.isOpened():
             self.video.release()
 

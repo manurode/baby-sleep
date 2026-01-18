@@ -74,6 +74,7 @@ class VideoCamera(object):
         self._processing_thread = None
         self._latest_raw_frame = None  # Latest raw frame for display
         self._frame_lock = threading.Lock()
+        self._motion_boxes = []  # Bounding boxes of detected motion areas
         
         try:
             with open("camera_debug.log", "w") as f:
@@ -200,6 +201,14 @@ class VideoCamera(object):
         self.motion_score = np.sum(thresh)
         self.motion_detected = self.motion_score > 500
         
+        # Find contours and save bounding boxes for display
+        contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        boxes = []
+        for contour in contours:
+            if cv2.contourArea(contour) > 100:  # Filter small noise
+                boxes.append(cv2.boundingRect(contour))
+        self._motion_boxes = boxes
+        
         # Update last_motion_time if motion is detected
         if self.motion_detected:
             self.last_motion_time = time.time()
@@ -314,22 +323,9 @@ class VideoCamera(object):
             roi_x, roi_y, roi_w, roi_h = roi_pixel
             cv2.rectangle(frame, (roi_x, roi_y), (roi_x + roi_w, roi_y + roi_h), (255, 255, 0), 2)
         
-        # Draw motion bounding box if motion detected
-        if self.motion_detected:
-            # Process current frame to get motion bounds for display
-            current_gray = self.process_frame(frame)
-            if self.last_frame is not None:
-                frame_delta = cv2.absdiff(self.last_frame, current_gray)
-                thresh = cv2.threshold(frame_delta, 5, 255, cv2.THRESH_BINARY)[1]
-                thresh = cv2.dilate(thresh, None, iterations=2)
-                
-                if roi_pixel is not None:
-                    mask = np.zeros(thresh.shape, dtype=np.uint8)
-                    mask[roi_pixel[1]:roi_pixel[1]+roi_pixel[3], roi_pixel[0]:roi_pixel[0]+roi_pixel[2]] = 255
-                    thresh = cv2.bitwise_and(thresh, mask)
-                
-                x, y, bw, bh = cv2.boundingRect(thresh)
-                cv2.rectangle(frame, (x, y), (x + bw, y + bh), (0, 255, 0), 1)
+        # Draw motion bounding boxes (calculated by background thread)
+        for (x, y, bw, bh) in self._motion_boxes:
+            cv2.rectangle(frame, (x, y), (x + bw, y + bh), (0, 255, 0), 2)
 
         cv2.putText(frame, f"Motion: {int(self.motion_score)}", (10, 30), 
                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, status_color, 2)

@@ -33,8 +33,7 @@ class SleepState(Enum):
     """Possible sleep states for the baby."""
     UNKNOWN = "unknown"
     NO_BREATHING = "no_breathing"   # No movement - ALERT
-    DEEP_SLEEP = "deep_sleep"       # Stable low movement (breathing rhythm)
-    SLEEPING = "sleeping"           # Light sleep with some movement
+    SLEEPING = "sleeping"           # Sleep with breathing or light movement
     SPASM = "spasm"                 # Temporary movement during sleep
     AWAKE = "awake"                 # Sustained active movement
 
@@ -59,11 +58,13 @@ class SleepManager:
     """
     
     # Thresholds (calibrated for actual camera readings)
-    NO_MOTION_THRESHOLD = 50000        # Below this = no breathing detected
-    BREATHING_LOW = 100000             # Minimum for breathing detection
-    BREATHING_HIGH = 1500000           # Maximum for sleep movement
-    MOVEMENT_THRESHOLD = 2000000       # Above this = active movement
-    AWAKE_THRESHOLD = 3000000          # High sustained movement
+    # Real motion scores during breathing: 0 - 500,000 (with many 0s due to frame processing)
+    # Real motion scores during active movement: 20,000,000+
+    NO_MOTION_THRESHOLD = 10000         # Mean must be below this to trigger no_breathing
+    BREATHING_LOW = 10000              # Minimum mean for breathing detection  
+    BREATHING_HIGH = 1500000           # Maximum mean for sleep movement
+    MOVEMENT_THRESHOLD = 5000000       # Mean above this = active movement
+    AWAKE_THRESHOLD = 10000000         # High sustained movement (very active)
     
     # Timing constants
     BUFFER_DURATION = 60.0             # Keep 60 seconds of history
@@ -74,21 +75,14 @@ class SleepManager:
     CONFIRM_AWAKE_SECONDS = 8.0        # Sustained movement to confirm awake
     CONFIRM_SLEEP_SECONDS = 15.0       # Calm period to confirm sleep
     CONFIRM_NO_BREATHING_SECONDS = 12.0 # Silence to trigger alert
-    CONFIRM_DEEP_SLEEP_SECONDS = 10.0  # Stable breathing to confirm deep sleep
     
     # Valid state transitions
     VALID_TRANSITIONS = {
-        SleepState.UNKNOWN: [SleepState.NO_BREATHING, SleepState.DEEP_SLEEP, 
-                             SleepState.SLEEPING, SleepState.AWAKE],
-        SleepState.NO_BREATHING: [SleepState.DEEP_SLEEP, SleepState.SLEEPING, 
-                                   SleepState.AWAKE],
-        SleepState.DEEP_SLEEP: [SleepState.SLEEPING, SleepState.SPASM, 
-                                 SleepState.NO_BREATHING, SleepState.AWAKE],
-        SleepState.SLEEPING: [SleepState.DEEP_SLEEP, SleepState.SPASM, 
-                               SleepState.NO_BREATHING, SleepState.AWAKE],
-        SleepState.SPASM: [SleepState.DEEP_SLEEP, SleepState.SLEEPING, 
-                           SleepState.AWAKE],
-        SleepState.AWAKE: [SleepState.SLEEPING, SleepState.DEEP_SLEEP],
+        SleepState.UNKNOWN: [SleepState.NO_BREATHING, SleepState.SLEEPING, SleepState.AWAKE],
+        SleepState.NO_BREATHING: [SleepState.SLEEPING, SleepState.AWAKE],
+        SleepState.SLEEPING: [SleepState.SPASM, SleepState.NO_BREATHING, SleepState.AWAKE],
+        SleepState.SPASM: [SleepState.SLEEPING, SleepState.AWAKE],
+        SleepState.AWAKE: [SleepState.SLEEPING],
     }
     
     def __init__(self):
@@ -156,6 +150,9 @@ class SleepManager:
             
             # Add to buffer
             self.motion_buffer.append((current_time, float(motion_score)))
+
+            # Log current motion score
+            logger.debug(f"Motion Score: {motion_score}")
             
             # Clean old entries from buffer
             self._clean_buffer(current_time)
@@ -174,11 +171,11 @@ class SleepManager:
             
             # Debug logging every 5 seconds
             if current_time - self._last_log_time > 5:
-                logger.debug(
-                    f"Analysis: mean={analysis['mean']:.0f}, std={analysis['std']:.0f}, "
-                    f"max={analysis['max']:.0f}, duration={analysis['window_duration']:.1f}s | "
-                    f"State: {self.current_state.value}"
-                )
+                # logger.debug(
+                #     f"Analysis: mean={analysis['mean']:.0f}, std={analysis['std']:.0f}, "
+                #     f"max={analysis['max']:.0f}, duration={analysis['window_duration']:.1f}s | "
+                #     f"State: {self.current_state.value}"
+                # )
                 self._last_log_time = current_time
             
             self._last_update_time = current_time
@@ -225,11 +222,12 @@ class SleepManager:
             std_score < mean_score * 0.5  # Low relative variance
         )
         
-        # Detect sustained high movement
+        # Detect sustained high movement (ratio of frames above threshold)
         high_movement_ratio = sum(1 for s in window_scores if s > self.MOVEMENT_THRESHOLD) / max(len(window_scores), 1)
         
-        # Detect no motion
-        no_motion_ratio = sum(1 for s in window_scores if s < self.NO_MOTION_THRESHOLD) / max(len(window_scores), 1)
+        # Detect no motion - use MEAN, not individual frame count
+        # This avoids false positives from camera processing frames that are 0
+        is_no_motion = mean_score < self.NO_MOTION_THRESHOLD
         
         return {
             'mean': mean_score,
@@ -238,7 +236,7 @@ class SleepManager:
             'min': min_score,
             'is_rhythmic': is_rhythmic,
             'high_movement_ratio': high_movement_ratio,
-            'no_motion_ratio': no_motion_ratio,
+            'is_no_motion': is_no_motion,
             'sample_count': len(window_scores),
             'window_duration': min(self.ANALYSIS_WINDOW, current_time - self.session_start_time),
             'spasm_max': spasm_max,
@@ -253,12 +251,12 @@ class SleepManager:
         mean = analysis['mean']
         max_score = analysis['max']
         high_ratio = analysis['high_movement_ratio']
-        no_motion_ratio = analysis['no_motion_ratio']
+        is_no_motion = analysis['is_no_motion']
         is_rhythmic = analysis['is_rhythmic']
         spasm_max = analysis['spasm_max']
         
-        # Priority 1: No breathing detection (> 70% of window is silent)
-        if no_motion_ratio > 0.7:
+        # Priority 1: No breathing detection (mean of window is very low)
+        if is_no_motion:
             return SleepState.NO_BREATHING
         
         # Priority 2: Check for sustained high movement (awake)
@@ -266,24 +264,17 @@ class SleepManager:
             return SleepState.AWAKE
         
         # Priority 3: Spasm detection - sudden spike during sleep
-        if self.current_state in (SleepState.SLEEPING, SleepState.DEEP_SLEEP, SleepState.SPASM):
+        if self.current_state in (SleepState.SLEEPING, SleepState.SPASM):
             if spasm_max > self.AWAKE_THRESHOLD and high_ratio < 0.3:
                 # High spike but not sustained = spasm
                 return SleepState.SPASM
         
-        # Priority 4: Deep sleep - stable rhythmic breathing
-        if is_rhythmic and mean < self.BREATHING_HIGH:
-            return SleepState.DEEP_SLEEP
-        
-        # Priority 5: Light sleep - some movement but not awake
-        if self.BREATHING_LOW < mean < self.AWAKE_THRESHOLD:
+        # Priority 4: Sleeping (any rhythm or movement < Awake Threshold)
+        # This covers what used to be Deep Sleep and Light Sleep
+        if mean < self.AWAKE_THRESHOLD:
             return SleepState.SLEEPING
         
-        # Priority 6: Very low movement but not zero = deep sleep
-        if self.NO_MOTION_THRESHOLD < mean < self.BREATHING_HIGH:
-            return SleepState.DEEP_SLEEP
-        
-        # Default: maintain current state
+        # Default: maintain current state or default to Sleeping if uncertain
         return self.current_state if self.current_state != SleepState.UNKNOWN else SleepState.SLEEPING
     
     def _handle_transition(self, target_state: SleepState, 
@@ -305,6 +296,11 @@ class SleepManager:
                     # Spasm window passed, return to sleep
                     self._execute_transition(self.pre_spasm_state or SleepState.SLEEPING, 
                                             current_time, "spasm_ended")
+            # Only reset pending if there was NO pending transition
+            # This prevents the timer from resetting when state briefly changes and comes back
+            if self.pending_state is None:
+                return
+            # If pending was the same as current, just clear it
             self.pending_state = None
             self.pending_state_time = None
             return
@@ -327,7 +323,7 @@ class SleepManager:
     def _find_valid_transition(self, target_state: SleepState) -> SleepState:
         """Find a valid intermediate state for transition."""
         # From AWAKE, we can only go to SLEEPING first
-        if self.current_state == SleepState.AWAKE and target_state == SleepState.DEEP_SLEEP:
+        if self.current_state == SleepState.AWAKE and target_state == SleepState.SLEEPING:
             return SleepState.SLEEPING
         
         # From NO_BREATHING, any sleep state is valid
@@ -348,11 +344,9 @@ class SleepManager:
         if to_state == SleepState.AWAKE:
             return self.CONFIRM_AWAKE_SECONDS
         
-        # Transitions to deep sleep need breathing rhythm confirmation
-        if to_state == SleepState.DEEP_SLEEP:
-            return self.CONFIRM_DEEP_SLEEP_SECONDS
+            return self.CONFIRM_AWAKE_SECONDS
         
-        # Transitions to light sleep from awake
+        # Transitions to sleep from awake
         if from_state == SleepState.AWAKE and to_state == SleepState.SLEEPING:
             return self.CONFIRM_SLEEP_SECONDS
         
@@ -371,7 +365,7 @@ class SleepManager:
             self.events.append(SleepEvent("spasm", current_time))
         
         # Track wake up
-        if old_state in (SleepState.SLEEPING, SleepState.DEEP_SLEEP) and new_state == SleepState.AWAKE:
+        if old_state == SleepState.SLEEPING and new_state == SleepState.AWAKE:
             self.wake_up_count += 1
             if self.last_sleep_start is not None:
                 sleep_duration = current_time - self.last_sleep_start
@@ -380,7 +374,7 @@ class SleepManager:
         
         # Track fell asleep
         if old_state in (SleepState.AWAKE, SleepState.UNKNOWN) and \
-           new_state in (SleepState.SLEEPING, SleepState.DEEP_SLEEP):
+           new_state == SleepState.SLEEPING:
             self.events.append(SleepEvent("fell_asleep", current_time))
             self.last_sleep_start = current_time
         
@@ -399,7 +393,7 @@ class SleepManager:
     def _update_metrics(self, current_time: float, analysis: Dict):
         """Update tracking metrics."""
         # Update breathing detection time
-        if self.current_state in (SleepState.SLEEPING, SleepState.DEEP_SLEEP, SleepState.SPASM):
+        if self.current_state in (SleepState.SLEEPING, SleepState.SPASM):
             if self._last_update_time > 0:
                 delta = current_time - self._last_update_time
                 self.breathing_detected_seconds += delta
@@ -431,7 +425,7 @@ class SleepManager:
                 ))
             
             # Breathing detected now
-            breathing_now = self.current_state in (SleepState.SLEEPING, SleepState.DEEP_SLEEP)
+            breathing_now = self.current_state == SleepState.SLEEPING
             
             # Time in current state
             state_duration = current_time - self.state_start_time if self.state_start_time > 0 else 0

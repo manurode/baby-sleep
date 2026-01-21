@@ -18,8 +18,7 @@ The system determines the state based on a priority waterfall:
 1.  **⚠️ NO BREATHING**: If >70% of the window has effectively zero motion (< 50k).
 2.  **👀 AWAKE**: Sustained high movement (> 3M) with high density.
 3.  **💢 SPASM**: A sudden spike (> 3M) that is *not* sustained (short duration).
-4.  **💤 DEEP SLEEP**: Rhythmic, low-variance motion (breathing detected).
-5.  **😴 SLEEPING**: Moderate motion (light sleep) between breathing and awake levels.
+4.  **� SLEEPING**: Normal sleep state. Covers both stable breathing (low motion) and light movement (moderate motion).
 
 ---
 
@@ -28,18 +27,19 @@ The system determines the state based on a priority waterfall:
 | State | Emoji | Condition (Simplified) | Description |
 |-------|-------|------------------------|-------------|
 | **No Breathing** | ⚠️ | Motion < 50,000 | Critical alert. No movement detected for extended time. |
-| **Deep Sleep** | 💤 | 100k < Motion < 1.5M | Rhythmic, stable breathing pattern detected. |
-| **Sleeping** | 😴 | 100k < Motion < 3M | General sleep. Variable movement but not awake. |
-| **Spasm** | � | Spike > 3M (Short) | Sudden jerk or movement returning to sleep quickly. |
+| **Sleeping** | � | 100k < Motion < 3M | Normal sleep. Includes rhythmic breathing and light movement. |
+| **Spasm** | 💢 | Spike > 3M (Short) | Sudden jerk or movement returning to sleep quickly. |
 | **Awake** | 👀 | Motion > 3M (Sustained) | Active, continuous movement. Baby is likely up. |
 
 ### Calibrated Thresholds
-*Values based on accumulated pixel difference scores.*
+*Values based on MEAN of accumulated pixel difference scores over 10-second window.*
 
-- **No Motion**: `< 50,000`
-- **Breathing Range**: `100,000` - `1,500,000`
-- **Active Movement**: `> 2,000,000`
-- **Awake Peak**: `> 3,000,000`
+- **No Motion (Mean)**: `< 10,000` → Triggers NO_BREATHING alert
+- **Breathing Range (Mean)**: `10,000` - `1,500,000`
+- **Active Movement (Mean)**: `> 5,000,000`
+- **Awake Peak (Mean)**: `> 10,000,000`
+
+**Note**: Individual frames often have `Motion Score: 0` due to camera frame processing. The system now uses the **mean of the window** instead of counting individual zero frames.
 
 ---
 
@@ -52,7 +52,6 @@ To prevent "state flickering" (e.g., rapid switching between Sleep/Awake), the s
 | **Awake** | **8.0 seconds** | Filters out short movements; ensures baby is truly active. |
 | **Sleeping** | **15.0 seconds** | Requires a period of calm to confirm baby has settled back down. |
 | **No Breathing**| **12.0 seconds** | Avoids false alarms from momentary stillness. |
-| **Deep Sleep** | **10.0 seconds** | Requires stable rhythm to confirm deep sleep. |
 | **Spasm** | **0.5 seconds** | Detected immediately to differentiate from waking up. |
 
 ---
@@ -77,7 +76,7 @@ Returns the current monitoring status and cumulative metrics.
 **Response Example:**
 ```json
 {
-    "current_state": "deep_sleep",
+    "current_state": "sleeping",
     "breathing_detected": true,
     "state_duration_seconds": 450,
     

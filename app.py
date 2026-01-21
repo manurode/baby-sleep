@@ -568,6 +568,13 @@ def sleep_events():
     })
 
 
+@app.route('/sleep_report')
+def sleep_report():
+    """Get comprehensive sleep report for parents."""
+    sleep_mgr = get_sleep_manager()
+    return jsonify(sleep_mgr.get_sleep_report())
+
+
 @app.route('/sleep_thresholds', methods=['GET', 'POST'])
 def sleep_thresholds():
     """Get or set sleep detection thresholds."""

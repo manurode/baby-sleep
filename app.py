@@ -1,8 +1,32 @@
 import cv2
 import time
 import threading
+import logging
 import numpy as np
 from flask import Flask, render_template, Response, jsonify, request
+from sleep_manager import get_sleep_manager
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s [%(name)s] %(levelname)s: %(message)s',
+    handlers=[
+        logging.FileHandler('baby_sleep.log'),
+        logging.StreamHandler()
+    ]
+)
+
+# Suppress werkzeug (Flask) request logging for noisy endpoints
+class StatusFilter(logging.Filter):
+    def filter(self, record):
+        # Filter out frequent polling requests
+        msg = record.getMessage()
+        if '/status' in msg or '/video_feed' in msg or '/sleep_stats' in msg:
+            return False
+        return True
+
+werkzeug_logger = logging.getLogger('werkzeug')
+werkzeug_logger.addFilter(StatusFilter())
 
 app = Flask(__name__)
 
@@ -161,6 +185,10 @@ class VideoCamera(object):
                     
                     # Process for motion detection
                     self._process_motion(frame)
+                    
+                    # Update sleep manager with current motion score
+                    sleep_mgr = get_sleep_manager()
+                    sleep_mgr.update(self.motion_score)
                     
             except Exception as e:
                 print(f"Error in background processing: {e}")
@@ -519,6 +547,60 @@ def reset_enhancements():
         print("Enhancements reset to defaults.")
     
     return jsonify({'status': 'ok'})
+
+
+# ==================== Sleep Monitoring Endpoints ====================
+
+@app.route('/sleep_stats')
+def sleep_stats():
+    """Get current sleep monitoring statistics."""
+    sleep_mgr = get_sleep_manager()
+    return jsonify(sleep_mgr.get_stats())
+
+
+@app.route('/sleep_events')
+def sleep_events():
+    """Get recent sleep events (wake ups, fell asleep, etc.)."""
+    sleep_mgr = get_sleep_manager()
+    count = request.args.get('count', 10, type=int)
+    return jsonify({
+        'events': sleep_mgr.get_recent_events(count)
+    })
+
+
+@app.route('/sleep_thresholds', methods=['GET', 'POST'])
+def sleep_thresholds():
+    """Get or set sleep detection thresholds."""
+    sleep_mgr = get_sleep_manager()
+    
+    if request.method == 'POST':
+        data = request.get_json() or {}
+        sleep_mgr.set_thresholds(
+            breathing_min=data.get('breathing_min'),
+            breathing_max=data.get('breathing_max'),
+            awake_threshold=data.get('awake_threshold')
+        )
+        return jsonify({'status': 'ok', 'thresholds': sleep_mgr.get_stats()['thresholds']})
+    
+    return jsonify(sleep_mgr.get_stats()['thresholds'])
+
+
+@app.route('/sleep_session', methods=['POST'])
+def sleep_session():
+    """Start or stop a sleep monitoring session."""
+    sleep_mgr = get_sleep_manager()
+    data = request.get_json() or {}
+    action = data.get('action', 'start')
+    
+    if action == 'start':
+        sleep_mgr.start_session()
+        return jsonify({'status': 'ok', 'message': 'Session started'})
+    elif action == 'stop':
+        sleep_mgr.stop_session()
+        return jsonify({'status': 'ok', 'message': 'Session stopped', 'stats': sleep_mgr.get_stats()})
+    else:
+        return jsonify({'status': 'error', 'message': 'Unknown action'}), 400
+
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True, use_reloader=False)

@@ -12,6 +12,10 @@ Tracks baby's sleep patterns using motion detection data with:
 import time
 import logging
 import statistics
+import json
+import os
+import uuid
+from datetime import datetime
 from enum import Enum
 from typing import List, Dict, Any, Optional, Tuple
 from collections import deque
@@ -198,6 +202,9 @@ class SleepManager:
     CONFIRM_NO_BREATHING_SECONDS = 12.0 # Silence to trigger alert
     CONFIRM_PHASE_CHANGE_SECONDS = 30.0 # Time to confirm sleep phase change
     
+    # History file path
+    HISTORY_FILE = "sleep_history.json"
+    
     # Valid state transitions
     VALID_TRANSITIONS = {
         SleepState.UNKNOWN: [SleepState.NO_BREATHING, SleepState.DEEP_SLEEP, 
@@ -218,10 +225,12 @@ class SleepManager:
         # Use RLock (re-entrant lock) to allow nested calls like get_sleep_report() -> get_stats()
         self.lock = threading.RLock()
         self.breathing_analyzer = BreathingAnalyzer()
+        self.session_id: Optional[str] = None
         self._reset_session()
         
     def _reset_session(self):
         """Reset all session data."""
+        self.session_id = str(uuid.uuid4())
         self.session_start_time: Optional[float] = None
         self.current_state = SleepState.UNKNOWN
         
@@ -272,11 +281,16 @@ class SleepManager:
             logger.info("Session started")
     
     def stop_session(self):
-        """Stop the current monitoring session."""
+        """Stop the current monitoring session and save to history."""
         with self.lock:
             if self.last_sleep_start is not None:
                 self.total_sleep_seconds += time.time() - self.last_sleep_start
                 self.last_sleep_start = None
+            
+            # Save to history if session had meaningful data
+            if self.session_start_time is not None and self.total_sleep_seconds >= 60:
+                self._save_to_history()
+            
             logger.info(f"Session stopped. Total sleep: {self.total_sleep_seconds:.1f}s")
     
     def update(self, motion_score: float) -> SleepState:
@@ -751,6 +765,91 @@ class SleepManager:
                 }
                 for e in recent
             ]
+    
+    def _save_to_history(self):
+        """Save the current session report to the history file."""
+        try:
+            report = self.get_sleep_report()
+            
+            # Create history entry with session metadata
+            history_entry = {
+                "id": self.session_id,
+                "timestamp": self.session_start_time,
+                "date_iso": datetime.fromtimestamp(self.session_start_time).isoformat(),
+                "duration_seconds": int(self.total_sleep_seconds),
+                "duration_formatted": report['summary']['total_sleep'],
+                "quality_score": report['summary']['quality_score'],
+                "quality_rating": report['summary']['quality_rating'],
+                "report": report
+            }
+            
+            # Load existing history
+            history = self._load_history()
+            
+            # Add new entry
+            history.append(history_entry)
+            
+            # Keep only last 100 entries
+            if len(history) > 100:
+                history = history[-100:]
+            
+            # Save back to file
+            with open(self.HISTORY_FILE, 'w') as f:
+                json.dump(history, f, indent=2)
+            
+            logger.info(f"Session {self.session_id} saved to history")
+            
+        except Exception as e:
+            logger.error(f"Error saving to history: {e}")
+    
+    def _load_history(self) -> List[Dict]:
+        """Load history from file."""
+        if not os.path.exists(self.HISTORY_FILE):
+            return []
+        
+        try:
+            with open(self.HISTORY_FILE, 'r') as f:
+                return json.load(f)
+        except (json.JSONDecodeError, IOError) as e:
+            logger.error(f"Error loading history: {e}")
+            return []
+    
+    def get_history(self, limit: int = 50) -> List[Dict[str, Any]]:
+        """
+        Get list of past sleep sessions (summary only).
+        Returns most recent sessions first.
+        """
+        with self.lock:
+            history = self._load_history()
+            
+            # Return most recent first, with summary data only
+            summaries = []
+            for entry in reversed(history[-limit:]):
+                summaries.append({
+                    "id": entry.get("id"),
+                    "timestamp": entry.get("timestamp"),
+                    "date_iso": entry.get("date_iso"),
+                    "duration_seconds": entry.get("duration_seconds"),
+                    "duration_formatted": entry.get("duration_formatted"),
+                    "quality_score": entry.get("quality_score"),
+                    "quality_rating": entry.get("quality_rating"),
+                })
+            
+            return summaries
+    
+    def get_session_report(self, session_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Get the full report for a specific session by ID.
+        Returns None if session not found.
+        """
+        with self.lock:
+            history = self._load_history()
+            
+            for entry in history:
+                if entry.get("id") == session_id:
+                    return entry.get("report")
+            
+            return None
     
     def set_thresholds(self, **kwargs):
         """Update detection thresholds."""

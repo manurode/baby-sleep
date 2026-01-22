@@ -609,6 +609,30 @@ def sleep_session():
         return jsonify({'status': 'error', 'message': 'Unknown action'}), 400
 
 
+# ==================== Sleep History Endpoints ====================
+
+@app.route('/sleep_history')
+def sleep_history():
+    """Get list of past sleep sessions (summary data for history list)."""
+    sleep_mgr = get_sleep_manager()
+    limit = request.args.get('limit', 50, type=int)
+    return jsonify({
+        'history': sleep_mgr.get_history(limit)
+    })
+
+
+@app.route('/sleep_report/<session_id>')
+def historical_sleep_report(session_id):
+    """Get the full report for a specific historical session."""
+    sleep_mgr = get_sleep_manager()
+    report = sleep_mgr.get_session_report(session_id)
+    
+    if report is None:
+        return jsonify({'error': 'Session not found'}), 404
+    
+    return jsonify(report)
+
+
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True, use_reloader=False)
 
